@@ -1,144 +1,169 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import React, { useRef, useState } from 'react';
+import { Alert, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-// This is the "Brain" of your Home Screen
 export default function HomeScreen() {
-  /**
-   * STEP 1: Define our States
-   * We have 3 states: 'idle', 'running', 'finished'
-   */
-  const [status, setStatus] = useState('idle');
+  const [status, setStatus] = useState<'idle' | 'running' | 'finished'>('idle');
+  const [showCamera, setShowCamera] = useState(false);
+  const [showReward, setShowReward] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
 
-  /**
-   * STEP 2: The Transition Logic
-   * This function handles the cycle: idle -> running -> finished -> idle
-   */
+  // 📸 NEW: State to track if we are using front or back camera
+  const [facing, setFacing] = useState<'front' | 'back'>('back');
+
+  const cameraRef = useRef<any>(null);
+  const [permission, requestPermission] = useCameraPermissions();
+
+  // STATE MACHINE
   const handlePress = () => {
     if (status === 'idle') {
       setStatus('running');
     } else if (status === 'running') {
       setStatus('finished');
-    } else if (status === 'finished') {
+      setShowReward(true);
+    } else {
       setStatus('idle');
     }
   };
 
-  /**
-   * STEP 3: Helper to get the Button Text based on the state
-   */
-  const getButtonText = () => {
-    if (status === 'idle') return 'START RUN';
-    if (status === 'running') return 'FINISH RUN';
-    if (status === 'finished') return 'RESET TO IDLE';
-    return 'ERROR';
+  // OPEN CAMERA
+  const openCamera = async () => {
+    if (!permission?.granted) {
+      const res = await requestPermission();
+      if (!res.granted) {
+        Alert.alert("Permission Needed", "Buddy needs camera access for your victory photo!");
+        return;
+      }
+    }
+    setShowReward(false);
+    setShowCamera(true);
+  };
+
+  // 📸 NEW: Toggle function to flip the camera
+  const toggleCamera = () => {
+    setFacing(current => (current === 'back' ? 'front' : 'back'));
+  };
+
+  // TAKE PHOTO
+  const takePhoto = async () => {
+    if (isCapturing) return;
+    try {
+      if (cameraRef.current) {
+        setIsCapturing(true);
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.5,
+          skipProcessing: true,
+        });
+        console.log('PHOTO CAPTURED:', photo.uri);
+        
+        Alert.alert("Success!", "Buddy saved your photo! 📸");
+        setShowCamera(false);
+        setIsCapturing(false);
+        setStatus('finished'); 
+      }
+    } catch (err) {
+      Alert.alert("Error", "Could not take photo.");
+      setIsCapturing(false);
+    }
   };
 
   return (
     <View style={styles.container}>
-      {/* State Display */}
-      <View style={styles.stateContainer}>
-        <Text style={styles.label}>CURRENT STATUS</Text>
-        <View style={[
-          styles.badge, 
-          status === 'running' ? styles.badgeRunning : 
-          status === 'finished' ? styles.badgeFinished : styles.badgeIdle
-        ]}>
-          <Text style={styles.badgeText}>{status.toUpperCase()}</Text>
-        </View>
-      </View>
+      <Text style={styles.label}>STATUS</Text>
+      <Text style={styles.status}>{status.toUpperCase()}</Text>
 
-      {/* Buddy Placeholder (Visual indicator of state) */}
-      <View style={styles.buddyBox}>
-        <Text style={styles.buddyEmoji}>
-          {status === 'idle' && '😴'}
-          {status === 'running' && '🏃‍♂️'}
-          {status === 'finished' && '🥳'}
+      <View style={styles.box}>
+        <Text style={styles.emoji}>
+          {status === 'idle' ? '😴' : status === 'running' ? '🏃‍♂️' : '🎉'}
         </Text>
-        <Text style={styles.buddyText}>
-          {status === 'idle' && 'Buddy is resting...'}
-          {status === 'running' && 'Buddy is moving!'}
-          {status === 'finished' && 'Buddy is proud of you!'}
+        <Text style={styles.subtext}>
+          {status === 'idle' ? 'Ready to start' : status === 'running' ? 'Running...' : 'Run complete!'}
         </Text>
       </View>
 
-      {/* The Simulation Button */}
-      <TouchableOpacity 
-        style={[
-          styles.button, 
-          status === 'running' ? styles.buttonStop : styles.buttonStart
-        ]} 
-        onPress={handlePress}
-      >
-        <Text style={styles.buttonText}>{getButtonText()}</Text>
+      <TouchableOpacity style={styles.button} onPress={handlePress}>
+        <Text style={styles.buttonText}>
+          {status === 'idle' ? 'START RUN' : status === 'running' ? 'FINISH RUN' : 'RESET'}
+        </Text>
       </TouchableOpacity>
+
+      {/* REWARD MODAL */}
+      <Modal visible={showReward} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Great Run 📸</Text>
+            <TouchableOpacity style={[styles.primaryBtn, { marginBottom: 10 }]} onPress={openCamera}>
+              <Text style={styles.primaryText}>Open Camera</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowReward(false)}>
+              <Text style={styles.secondaryText}>Skip</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CAMERA VIEW */}
+      <Modal visible={showCamera} animationType="fade">
+        <CameraView
+          style={styles.camera}
+          ref={cameraRef}
+          facing={facing} // 📸 Updated to use our new state
+        >
+          <View style={styles.cameraUI}>
+
+            {/* 📸 NEW: Flip Camera Button (Top Left) */}
+            <TouchableOpacity
+              style={styles.flipButton}
+              onPress={toggleCamera}
+            >
+              <Text style={styles.flipText}>🔄 FLIP</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.capture, isCapturing && { opacity: 0.5 }]} 
+              onPress={takePhoto}
+              disabled={isCapturing}
+            >
+              <View style={styles.captureInner} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.close}
+              onPress={() => setShowCamera(false)}
+            >
+              <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>Close</Text>
+            </TouchableOpacity>
+
+          </View>
+        </CameraView>
+      </Modal>
     </View>
   );
 }
 
-// Minimal Styling
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 30,
-  },
-  stateContainer: {
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  label: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#94a3b8',
-    letterSpacing: 2,
-    marginBottom: 10,
-  },
-  badge: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  badgeIdle: { backgroundColor: '#64748b' },
-  badgeRunning: { backgroundColor: '#2563eb' },
-  badgeFinished: { backgroundColor: '#16a34a' },
-  badgeText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  buddyBox: {
-    width: '100%',
-    height: 250,
-    backgroundColor: 'white',
-    borderRadius: 30,
-    borderWidth: 2,
-    borderColor: '#e2e8f0',
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 50,
-  },
-  buddyEmoji: {
-    fontSize: 60,
-    marginBottom: 20,
-  },
-  buddyText: {
-    color: '#64748b',
-    fontWeight: '600',
-  },
-  button: {
-    width: '100%',
-    padding: 20,
-    borderRadius: 15,
-    alignItems: 'center',
-  },
-  buttonStart: { backgroundColor: '#0f172a' },
-  buttonStop: { backgroundColor: '#ef4444' },
-  buttonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '900',
-  },
+  container: { flex: 1, backgroundColor: '#f8fafc', justifyContent: 'center', alignItems: 'center', padding: 30 },
+  label: { fontSize: 10, color: '#94a3b8', fontWeight: 'bold', letterSpacing: 2 },
+  status: { fontSize: 22, fontWeight: '900', marginBottom: 20 },
+  box: { width: '100%', height: 250, backgroundColor: 'white', borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 30, borderWidth: 1, borderColor: '#e2e8f0' },
+  emoji: { fontSize: 60 },
+  subtext: { marginTop: 10, color: '#64748b', fontWeight: '500' },
+  button: { width: '100%', backgroundColor: '#0f172a', padding: 18, borderRadius: 15, alignItems: 'center' },
+  buttonText: { color: 'white', fontWeight: '900', fontSize: 16 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalBox: { width: '85%', backgroundColor: 'white', padding: 30, borderRadius: 30, alignItems: 'center' },
+  modalTitle: { fontSize: 22, fontWeight: '900', marginBottom: 25 },
+  primaryBtn: { backgroundColor: '#2563eb', padding: 18, width: '100%', borderRadius: 15, alignItems: 'center' },
+  primaryText: { color: 'white', fontWeight: 'bold' },
+  secondaryText: { marginTop: 15, color: '#94a3b8', fontWeight: 'bold' },
+  camera: { flex: 1 },
+  cameraUI: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 60 },
+  
+  // 📸 NEW: Flip Button Style
+  flipButton: { position: 'absolute', top: 60, left: 30, backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 10 },
+  flipText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+
+  capture: { width: 80, height: 80, borderRadius: 40, borderWidth: 6, borderColor: 'white', justifyContent: 'center', alignItems: 'center' },
+  captureInner: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'white' },
+  close: { position: 'absolute', top: 60, right: 30, backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 10 }
 });
