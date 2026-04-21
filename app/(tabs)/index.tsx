@@ -1,75 +1,144 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+// This is the "Brain" of your Home Screen
 export default function HomeScreen() {
+  /**
+   * STEP 1: Define our States
+   * We have 3 states: 'idle', 'running', 'finished'
+   */
   const [status, setStatus] = useState('idle');
+
+  /**
+   * STEP 2: The Transition Logic
+   * This function handles the cycle: idle -> running -> finished -> idle
+   */
+  const handlePress = () => {
+    if (status === 'idle') {
+      setStatus('running');
+    } else if (status === 'running') {
+      setStatus('finished');
+    } else if (status === 'finished') {
+      setStatus('idle');
+    }
+  };
+
+  /**
+   * STEP 3: Helper to get the Button Text based on the state
+   */
+  const getButtonText = () => {
+    if (status === 'idle') return 'START RUN';
+    if (status === 'running') return 'FINISH RUN';
+    if (status === 'finished') return 'RESET TO IDLE';
+    return 'ERROR';
+  };
 
   return (
     <View style={styles.container}>
-      {/* System Status Header */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <Text style={styles.viewLabel}>View 01: Core</Text>
-          <View style={[styles.stateBadge, { backgroundColor: status === 'running' ? '#2563eb' : '#1e293b' }]}>
-            <Text style={styles.stateBadgeText}>STATE: {status.toUpperCase()}</Text>
-          </View>
+      {/* State Display */}
+      <View style={styles.stateContainer}>
+        <Text style={styles.label}>CURRENT STATUS</Text>
+        <View style={[
+          styles.badge, 
+          status === 'running' ? styles.badgeRunning : 
+          status === 'finished' ? styles.badgeFinished : styles.badgeIdle
+        ]}>
+          <Text style={styles.badgeText}>{status.toUpperCase()}</Text>
         </View>
       </View>
 
-      {/* Main UI Card */}
-      <View style={styles.mainCard}>
-        <View style={[styles.buddyBox, { backgroundColor: status === 'running' ? '#f0f7ff' : '#f8fafc', borderColor: status === 'running' ? '#dbeafe' : '#e2e8f0' }]}>
-          <Text style={[styles.buddyText, { color: status === 'running' ? '#3b82f6' : '#94a3b8' }]}>
-            {status === 'running' ? '[Buddy: Active]' : '[Buddy: Idle]'}
-          </Text>
-          {status === 'running' && <View style={styles.spinnerPlaceholder} />}
-        </View>
-
-        <View style={styles.textContainer}>
-          <Text style={styles.title}>
-            {status === 'running' ? '14:22' : 'Ready to roll?'}
-          </Text>
-          <Text style={styles.subtitle}>
-            {status === 'running' ? 'Simulation Active' : 'Your buddy is waiting for movement.'}
-          </Text>
-        </View>
-
-        <TouchableOpacity 
-          activeOpacity={0.9}
-          style={[styles.button, status === 'running' ? styles.stopBtn : styles.runBtn]}
-          onPress={() => setStatus(status === 'running' ? 'finished' : 'running')}
-        >
-          <Text style={styles.buttonText}>
-            {status === 'running' ? 'STOP RUN' : 'SIMULATE RUN'}
-          </Text>
-        </TouchableOpacity>
+      {/* Buddy Placeholder (Visual indicator of state) */}
+      <View style={styles.buddyBox}>
+        <Text style={styles.buddyEmoji}>
+          {status === 'idle' && '😴'}
+          {status === 'running' && '🏃‍♂️'}
+          {status === 'finished' && '🥳'}
+        </Text>
+        <Text style={styles.buddyText}>
+          {status === 'idle' && 'Buddy is resting...'}
+          {status === 'running' && 'Buddy is moving!'}
+          {status === 'finished' && 'Buddy is proud of you!'}
+        </Text>
       </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>RUN_BUDDY_ALPHA  •  BUILD.PROTO.LOGIC</Text>
-      </View>
+      {/* The Simulation Button */}
+      <TouchableOpacity 
+        style={[
+          styles.button, 
+          status === 'running' ? styles.buttonStop : styles.buttonStart
+        ]} 
+        onPress={handlePress}
+      >
+        <Text style={styles.buttonText}>{getButtonText()}</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
+// Minimal Styling
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc', padding: 25 },
-  header: { marginBottom: 20 },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  viewLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', letterSpacing: 2 },
-  stateBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  stateBadgeText: { color: 'white', fontSize: 10, fontWeight: '800' },
-  mainCard: { backgroundColor: 'white', borderRadius: 40, padding: 30, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 20, borderStyle: 'solid', borderColor: '#f1f5f9', borderWidth: 1 },
-  buddyBox: { height: 220, borderRadius: 30, borderStyle: 'dashed', borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginBottom: 30 },
-  buddyText: { fontSize: 12, fontWeight: '700', letterSpacing: 1 },
-  spinnerPlaceholder: { marginTop: 15, width: 30, height: 30, borderRadius: 15, borderTopWidth: 3, borderColor: '#3b82f6', borderLeftWidth: 3, borderLeftColor: 'transparent' },
-  textContainer: { alignItems: 'center', marginBottom: 40 },
-  title: { fontSize: 32, fontWeight: '900', color: '#0f172a' },
-  subtitle: { fontSize: 14, color: '#64748b', marginTop: 5, fontWeight: '500' },
-  button: { width: '100%', paddingVertical: 20, borderRadius: 15, alignItems: 'center' },
-  runBtn: { backgroundColor: '#0f172a' },
-  stopBtn: { backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca' },
-  buttonText: { color: 'white', fontSize: 18, fontWeight: '900' },
-  footer: { position: 'absolute', bottom: 20, left: 0, right: 0, alignItems: 'center' },
-  footerText: { fontSize: 10, fontWeight: 'bold', color: '#cbd5e1', letterSpacing: 2 }
+  container: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 30,
+  },
+  stateContainer: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  label: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#94a3b8',
+    letterSpacing: 2,
+    marginBottom: 10,
+  },
+  badge: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  badgeIdle: { backgroundColor: '#64748b' },
+  badgeRunning: { backgroundColor: '#2563eb' },
+  badgeFinished: { backgroundColor: '#16a34a' },
+  badgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  buddyBox: {
+    width: '100%',
+    height: 250,
+    backgroundColor: 'white',
+    borderRadius: 30,
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 50,
+  },
+  buddyEmoji: {
+    fontSize: 60,
+    marginBottom: 20,
+  },
+  buddyText: {
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  button: {
+    width: '100%',
+    padding: 20,
+    borderRadius: 15,
+    alignItems: 'center',
+  },
+  buttonStart: { backgroundColor: '#0f172a' },
+  buttonStop: { backgroundColor: '#ef4444' },
+  buttonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '900',
+  },
 });
