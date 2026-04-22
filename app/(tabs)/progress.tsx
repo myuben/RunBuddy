@@ -5,16 +5,39 @@ import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } fr
 
 export default function ProgressScreen() {
   const [history, setHistory] = useState<any[]>([]);
-  const [selectedRun, setSelectedRun] = useState<any>(null); // For the pop-up viewer
+  const [streak, setStreak] = useState(0);
+  const [selectedRun, setSelectedRun] = useState<any>(null);
   const navigation = useNavigation();
 
-  const loadHistory = async () => {
+  const calculateStreak = (runs: any[]) => {
+    if (!runs || runs.length === 0) return 0;
+    const dates = Array.from(new Set(runs.map(r => new Date(r.date).toISOString().split('T')[0]))).sort((a, b) => b.localeCompare(a));
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    if (dates[0] !== today && dates[0] !== yesterday) return 0;
+    let count = 0, expected = new Date(dates[0]);
+    for (const d of dates) {
+      if (new Date(d).toDateString() === expected.toDateString()) { count++; expected.setDate(expected.getDate() - 1); }
+      else break;
+    }
+    return count;
+  };
+
+  const loadData = async () => {
     const saved = await AsyncStorage.getItem('RUN_HISTORY');
-    if (saved) setHistory(JSON.parse(saved));
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setHistory(parsed);
+      setStreak(calculateStreak(parsed));
+    } else {
+      setHistory([]);
+      setStreak(0);
+      setSelectedRun(null);
+    }
   };
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', loadHistory);
+    const unsubscribe = navigation.addListener('focus', loadData);
     return unsubscribe;
   }, [navigation]);
 
@@ -24,30 +47,32 @@ export default function ProgressScreen() {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  // 🔥 CORE FIX: FILTER OUT ANY RUNS WITHOUT A PHOTO URI
+  const photoRuns = history.filter(run => run.reward?.photoUri && run.reward.photoUri !== '');
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.viewLabel}>View 02: Verification</Text>
       
-      {/* 1. STATS GRID */}
       <View style={styles.statsGrid}>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>TOTAL RUNS</Text>
           <Text style={styles.statValue}>{history.length}</Text>
         </View>
         <View style={[styles.statCard, { borderColor: '#f97316' }]}>
-          <Text style={[styles.statLabel, { color: '#f97316' }]}>DAY STREAK</Text>
-          <Text style={[styles.statValue, { color: '#f97316' }]}>5</Text>
+          {/* 🔥 GRAMMAR FIX: 1 Day vs X Days */}
+          <Text style={[styles.statLabel, { color: '#f97316' }]}>{streak === 1 ? 'DAY STREAK' : 'DAYS STREAK'}</Text>
+          <Text style={[styles.statValue, { color: '#f97316' }]}>{streak}</Text>
         </View>
       </View>
-
-      {/* 2. MOMENT REEL */}
+      
       <View style={styles.reelCard}>
         <Text style={styles.reelTitle}>MOMENT REEL</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.reelScroll}>
-          {history.length === 0 ? (
-            <Text style={styles.emptyText}>No moments captured yet!</Text>
+          {photoRuns.length === 0 ? (
+            <Text style={styles.emptyText}>No victory photos captured yet!</Text>
           ) : (
-            history.map((run, i) => (
+            photoRuns.map((run, i) => (
               <TouchableOpacity key={i} onPress={() => setSelectedRun(run)} style={styles.snapshot}>
                 <Image source={{ uri: run.reward?.photoUri }} style={styles.image} />
                 <Text style={styles.dateLabel}>{new Date(run.date).toLocaleDateString()}</Text>
@@ -56,24 +81,19 @@ export default function ProgressScreen() {
           )}
         </ScrollView>
       </View>
-
-      {/* 3. PHOTO DETAIL VIEWER (POPU-UI) */}
+      
       <Modal visible={!!selectedRun} transparent animationType="fade">
         <View style={styles.fullOverlay}>
           <View style={styles.viewerBox}>
             <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedRun(null)}>
               <Text style={{ fontWeight: 'bold', color: '#94a3b8' }}>CLOSE</Text>
             </TouchableOpacity>
-
-            <Image source={{ uri: selectedRun?.reward?.photoUri }} style={styles.fullImage} />
-            
+            {selectedRun?.reward?.photoUri && <Image source={{ uri: selectedRun.reward.photoUri }} style={styles.fullImage} />}
             <View style={styles.details}>
               <Text style={styles.detailTitle}>RUN SUMMARY</Text>
               <Text style={styles.detailText}>Time: {formatDuration(selectedRun?.stats.duration || 0)}</Text>
               <Text style={styles.detailText}>Distance: {selectedRun?.stats.distance} KM</Text>
             </View>
-
-            {/* SHARE BUTTON PLACEHOLDER */}
             <TouchableOpacity style={styles.shareBtn} onPress={() => alert('Sharing logic coming soon!')}>
               <Text style={styles.shareBtnText}>📤 SHARE MOMENT</Text>
             </TouchableOpacity>
@@ -86,7 +106,7 @@ export default function ProgressScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
-  content: { padding: 25 },
+  content: { padding: 25, paddingTop: 60 },
   viewLabel: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8', letterSpacing: 2, marginBottom: 20 },
   statsGrid: { flexDirection: 'row', gap: 15, marginBottom: 30 },
   statCard: { flex: 1, backgroundColor: 'white', padding: 20, borderRadius: 25, borderWidth: 1, borderColor: '#e2e8f0' },
@@ -99,8 +119,6 @@ const styles = StyleSheet.create({
   snapshot: { width: 120, alignItems: 'center' },
   image: { width: 120, height: 160, borderRadius: 15, backgroundColor: '#1e293b' },
   dateLabel: { color: 'white', fontSize: 10, marginTop: 8, opacity: 0.5 },
-  
-  // Viewer Modal
   fullOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   viewerBox: { width: '100%', backgroundColor: 'white', borderRadius: 35, padding: 20, alignItems: 'center' },
   closeBtn: { alignSelf: 'flex-end', padding: 10 },

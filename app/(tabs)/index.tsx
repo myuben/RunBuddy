@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useNavigation } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -13,10 +14,34 @@ export default function HomeScreen() {
   const cameraRef = useRef<any>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [timer, setTimer] = useState(0);
-  const [currentRun, setCurrentRun] = useState<any>(null);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [streak, setStreak] = useState(0);
 
-  // Timer logic
+  const navigation = useNavigation();
+
+  // 🔥 DETECT RESET: Listen for tab focus and fresh storage
+  const loadData = async () => {
+    const saved = await AsyncStorage.getItem('RUN_HISTORY');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setHistory(parsed);
+      setStreak(calculateStreak(parsed));
+    } else {
+      // CLEAR EVERYTHING IF STORAGE IS EMPTY
+      setHistory([]);
+      setStreak(0);
+      setStatus('idle');
+      setTimer(0);
+      setCurrentRunId(null);
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', loadData);
+    return unsubscribe;
+  }, [navigation]);
+
   useEffect(() => {
     let interval: any;
     if (status === 'running') {
@@ -25,40 +50,38 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [status]);
 
-  // Load history to calculate streak
-  useEffect(() => {
-    const loadData = async () => {
-      const saved = await AsyncStorage.getItem('RUN_HISTORY');
-      if (saved) setHistory(JSON.parse(saved));
-    };
-    loadData();
-  }, [status]);
-
-  const saveRunToHistory = async (run: any) => {
-    const updated = [...history, run];
-    setHistory(updated);
-    await AsyncStorage.setItem('RUN_HISTORY', JSON.stringify(updated));
+  const calculateStreak = (runs: any[]) => {
+    if (!runs || runs.length === 0) return 0;
+    const dates = Array.from(new Set(runs.map(r => new Date(r.date).toISOString().split('T')[0]))).sort((a, b) => b.localeCompare(a));
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    if (dates[0] !== today && dates[0] !== yesterday) return 0;
+    let count = 0, expected = new Date(dates[0]);
+    for (const d of dates) {
+      if (new Date(d).toDateString() === expected.toDateString()) { count++; expected.setDate(expected.getDate() - 1); }
+      else break;
+    }
+    return count;
   };
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  };
-
-  const handlePress = () => {
+  const handlePress = async () => {
     if (status === 'idle') {
       setTimer(0);
       setStatus('running');
     } else if (status === 'running') {
       const distance = (timer / 300).toFixed(2);
+      const newRunId = Math.random().toString(36).substring(2);
       const run = {
-        id: Math.random().toString(36).substring(2),
+        id: newRunId,
         date: new Date().toISOString(),
         stats: { duration: timer, distance },
         reward: { photoUri: '' }
       };
-      setCurrentRun(run);
+      
+      const updatedHistory = [...history, run];
+      await AsyncStorage.setItem('RUN_HISTORY', JSON.stringify(updatedHistory));
+      setHistory(updatedHistory);
+      setCurrentRunId(newRunId);
       setStatus('finished');
       setShowReward(true);
     } else {
@@ -82,90 +105,52 @@ export default function HomeScreen() {
       if (cameraRef.current) {
         setIsCapturing(true);
         const photo = await cameraRef.current.takePictureAsync({ quality: 0.5 });
-        const finalRun = { ...currentRun, reward: { photoUri: photo.uri } };
-        await saveRunToHistory(finalRun);
-        Alert.alert('Saved!', 'Victory photo stored! 📸');
+        const updatedHistory = history.map(r => 
+          r.id === currentRunId ? { ...r, reward: { photoUri: photo.uri } } : r
+        );
+        await AsyncStorage.setItem('RUN_HISTORY', JSON.stringify(updatedHistory));
+        setHistory(updatedHistory);
         setShowCamera(false);
         setIsCapturing(false);
+        Alert.alert('Saved!', 'Victory photo pinned! 📸');
       }
-    } catch (e) {
-      setIsCapturing(false);
-    }
+    } catch (e) { setIsCapturing(false); }
+  };
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
   return (
     <View style={styles.container}>
-      {/* 1. TOP STATS BAR */}
       <View style={styles.header}>
         <View style={styles.streakBadge}>
           <Text style={styles.streakEmoji}>🔥</Text>
-          <Text style={styles.streakText}>STREAK: 5 DAYS</Text>
+          {/* 🔥 GRAMMAR FIX: 1 Day vs X Days */}
+          <Text style={styles.streakText}>STREAK: {streak} {streak === 1 ? 'DAY' : 'DAYS'}</Text>
         </View>
         <View style={[styles.stageBadge, { backgroundColor: status === 'running' ? '#2563eb' : '#1e293b' }]}>
           <Text style={styles.stageText}>STAGE: {status.toUpperCase()}</Text>
         </View>
       </View>
-
-      {/* 2. MAIN TIMER */}
       <Text style={styles.label}>RUN DURATION</Text>
       <Text style={styles.timerBold}>{formatTime(timer)}</Text>
-
-      {/* 3. BUDDY AREA */}
       <View style={styles.buddyCard}>
-        <Text style={styles.emojiDisplay}>
-          {status === 'idle' ? '😴' : status === 'running' ? '🏃‍♂️' : '🎉'}
-        </Text>
-        <Text style={styles.buddyMood}>
-          {status === 'idle' ? 'Buddy is resting...' : status === 'running' ? 'Tracking effort!' : 'Run Summary Ready!'}
-        </Text>
+        <Text style={styles.emojiDisplay}>{status === 'idle' ? '😴' : status === 'running' ? '🏃‍♂️' : '🎉'}</Text>
+        <Text style={styles.buddyMood}>{status === 'idle' ? 'Buddy is resting...' : status === 'running' ? 'Tracking effort!' : 'Run Summary Ready!'}</Text>
       </View>
-
-      {/* 4. PRIMARY BUTTON */}
       <TouchableOpacity style={[styles.actionBtn, status === 'running' && { backgroundColor: '#ef4444' }]} onPress={handlePress}>
-        <Text style={styles.actionBtnText}>
-          {status === 'idle' ? 'START RUN' : status === 'running' ? 'FINISH RUN' : 'RESET SESSION'}
-        </Text>
+        <Text style={styles.actionBtnText}>{status === 'idle' ? 'START RUN' : status === 'running' ? 'FINISH RUN' : 'RESET SESSION'}</Text>
       </TouchableOpacity>
-
-      {/* REWARD MODAL */}
       <Modal visible={showReward} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Great Run! 📸</Text>
-            <View style={styles.summaryStats}>
-              <Text style={styles.sumText}>Time: {formatTime(timer)}</Text>
-              <Text style={styles.sumText}>Distance: {(timer / 300).toFixed(2)} KM</Text>
-            </View>
-            <TouchableOpacity style={styles.rewardBtn} onPress={openCamera}>
-              <Text style={styles.rewardBtnText}>Open Camera</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowReward(false)} style={{ marginTop: 20 }}>
-              <Text style={styles.skipText}>Skip reward</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <View style={styles.modalOverlay}><View style={styles.modalBox}><Text style={styles.modalTitle}>Great Run! 📸</Text><View style={styles.summaryStats}><Text style={styles.sumText}>Time: {formatTime(timer)}</Text><Text style={styles.sumText}>Distance: {(timer / 300).toFixed(2)} KM</Text></View>
+        <TouchableOpacity style={styles.rewardBtn} onPress={openCamera}><Text style={styles.rewardBtnText}>Open Camera</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowReward(false)} style={{ marginTop: 20 }}><Text style={styles.skipText}>Skip reward</Text></TouchableOpacity></View></View>
       </Modal>
-
-      {/* CAMERA MODAL - FIXED UI */}
       <Modal visible={showCamera} animationType="fade">
-        <CameraView style={styles.camera} ref={cameraRef} facing={facing}>
-          {/* Top Controls */}
-          <View style={styles.cameraTopControls}>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => setFacing(f => f === 'back' ? 'front' : 'back')}>
-              <Text style={styles.iconEmoji}>🔄</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => setShowCamera(false)}>
-              <Text style={styles.iconEmoji}>ⓧ</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Bottom Shutter */}
-          <View style={styles.cameraBottomUI}>
-            <TouchableOpacity style={styles.shutter} onPress={takePhoto} disabled={isCapturing}>
-              <View style={styles.shutterInner} />
-            </TouchableOpacity>
-          </View>
-        </CameraView>
+        <CameraView style={styles.camera} ref={cameraRef} facing={facing}><View style={styles.cameraTopControls}><TouchableOpacity style={styles.iconBtn} onPress={() => setFacing(f => f === 'back' ? 'front' : 'back')}><Text style={styles.iconEmoji}>🔄</Text></TouchableOpacity><TouchableOpacity style={styles.iconBtn} onPress={() => setShowCamera(false)}><Text style={styles.iconEmoji}>ⓧ</Text></TouchableOpacity></View><View style={styles.cameraBottomUI}><TouchableOpacity style={styles.shutter} onPress={takePhoto} disabled={isCapturing}><View style={styles.shutterInner} /></TouchableOpacity></View></CameraView>
       </Modal>
     </View>
   );
