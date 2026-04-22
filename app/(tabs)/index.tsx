@@ -24,16 +24,42 @@ export default function HomeScreen() {
 
   const navigation = useNavigation();
 
+// ⚡️ AUDITED STREAK LOGIC
   const calculateStreak = (runs: any[]) => {
     if (!runs || runs.length === 0) return 0;
-    const dates = Array.from(new Set(runs.map(r => new Date(r.date).toISOString().split('T')[0]))).sort((a, b) => b.localeCompare(a));
-    const today = new Date().toISOString().split('T')[0];
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-    if (dates[0] !== today && dates[0] !== yesterday) return 0;
-    let count = 0, expected = new Date(dates[0]);
-    for (const d of dates) {
-      if (new Date(d).toDateString() === expected.toDateString()) { count++; expected.setDate(expected.getDate() - 1); }
-      else break;
+
+    // 1. Convert all dates to Local YYYY-MM-DD (Fixes Timezone/Duplicate bugs)
+    const localDates = runs.map(r => {
+      const d = new Date(r.date);
+      // Returns 'YYYY-MM-DD' in local time
+      return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+    });
+
+    // 2. Remove duplicates (Multiple runs in one day = 1 streak day)
+    const uniqueDates = Array.from(new Set(localDates)).sort((a, b) => b.localeCompare(a));
+
+    // 3. Check if we have a run today or yesterday
+    const now = new Date();
+    const today = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+    
+    const yesterdayDate = new Date(Date.now() - 86400000);
+    const yesterday = `${yesterdayDate.getFullYear()}-${(yesterdayDate.getMonth() + 1).toString().padStart(2, '0')}-${yesterdayDate.getDate().toString().padStart(2, '0')}`;
+
+    if (uniqueDates[0] !== today && uniqueDates[0] !== yesterday) return 0;
+
+    // 4. Count backward consecutively
+    let count = 0;
+    let checkDate = new Date(uniqueDates[0]); // Start from the most recent run
+
+    for (const dateStr of uniqueDates) {
+      const current = new Date(dateStr);
+      // If this date is the one we expect (consecutive), increment
+      if (current.toDateString() === checkDate.toDateString()) {
+        count++;
+        checkDate.setDate(checkDate.getDate() - 1); // Look for the previous day
+      } else {
+        break; // Gap found!
+      }
     }
     return count;
   };
