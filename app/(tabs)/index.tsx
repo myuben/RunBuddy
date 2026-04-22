@@ -1,79 +1,76 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function HomeScreen() {
-  // --- 1. CORE STATES ---
   const [status, setStatus] = useState<'idle' | 'running' | 'finished'>('idle');
   const [showCamera, setShowCamera] = useState(false);
   const [showReward, setShowReward] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [facing, setFacing] = useState<'front' | 'back'>('back');
+  
   const cameraRef = useRef<any>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const [timer, setTimer] = useState(0);
+  const [currentRun, setCurrentRun] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
 
-  // --- 2. RUN DATA STATES ---
-  const [timer, setTimer] = useState(0); // Real seconds elapsed
-  const [currentRun, setCurrentRun] = useState<any>(null); // Our Run Object
-
-  // --- 3. TIMER LOGIC ---
+  // Timer logic
   useEffect(() => {
     let interval: any;
     if (status === 'running') {
-      interval = setInterval(() => {
-        setTimer((prev) => prev + 1);
-      }, 1000);
-    } else {
-      clearInterval(interval);
+      interval = setInterval(() => setTimer((t) => t + 1), 1000);
     }
-    return () => clearInterval(interval); 
+    return () => clearInterval(interval);
   }, [status]);
 
-  // Helper to turn 72 seconds into "01:12"
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  // Load history to calculate streak
+  useEffect(() => {
+    const loadData = async () => {
+      const saved = await AsyncStorage.getItem('RUN_HISTORY');
+      if (saved) setHistory(JSON.parse(saved));
+    };
+    loadData();
+  }, [status]);
+
+  const saveRunToHistory = async (run: any) => {
+    const updated = [...history, run];
+    setHistory(updated);
+    await AsyncStorage.setItem('RUN_HISTORY', JSON.stringify(updated));
   };
 
-  // --- 4. STATE TRANSITIONS ---
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+  };
+
   const handlePress = () => {
     if (status === 'idle') {
-      // RESET AND START
       setTimer(0);
       setStatus('running');
     } else if (status === 'running') {
-      // FINISH AND CALCULATE DATA
-      const calculatedDistance = (timer / 300).toFixed(2); // Simulated distance
-
-      const newRun = {
-        id: Math.random().toString(36).substr(2, 9),
+      const distance = (timer / 300).toFixed(2);
+      const run = {
+        id: Math.random().toString(36).substring(2),
         date: new Date().toISOString(),
-        stats: {
-          duration: timer,
-          distance: calculatedDistance,
-        },
-        reward: {
-          photoUri: '',
-        }
+        stats: { duration: timer, distance },
+        reward: { photoUri: '' }
       };
-      
-      setCurrentRun(newRun); // Create the object
+      setCurrentRun(run);
       setStatus('finished');
-      setShowReward(true); // Trigger pop-up
+      setShowReward(true);
     } else {
-      // GO BACK TO IDLE
       setStatus('idle');
-      setCurrentRun(null);
       setTimer(0);
     }
   };
 
-  // --- 5. CAMERA LOGIC ---
   const openCamera = async () => {
     if (!permission?.granted) {
       const res = await requestPermission();
-      if (!res.granted) return Alert.alert("Permission Error", "Buddy needs the camera!");
+      if (!res.granted) return Alert.alert('Permission needed');
     }
     setShowReward(false);
     setShowCamera(true);
@@ -84,101 +81,88 @@ export default function HomeScreen() {
     try {
       if (cameraRef.current) {
         setIsCapturing(true);
-        const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.5,
-          skipProcessing: true,
-        });
-
-        // Save the Photo URI into our Run Object
-        setCurrentRun((prev: any) => ({
-          ...prev,
-          reward: { photoUri: photo.uri }
-        }));
-
-        Alert.alert("Success!", "Run data & photo saved! 📸");
+        const photo = await cameraRef.current.takePictureAsync({ quality: 0.5 });
+        const finalRun = { ...currentRun, reward: { photoUri: photo.uri } };
+        await saveRunToHistory(finalRun);
+        Alert.alert('Saved!', 'Victory photo stored! 📸');
         setShowCamera(false);
         setIsCapturing(false);
-        setStatus('finished'); 
       }
-    } catch (err) {
-      Alert.alert("Error", "Could not capture photo.");
+    } catch (e) {
       setIsCapturing(false);
     }
   };
 
   return (
     <View style={styles.container}>
-      {/* HEADER: REAL TIME DISPLAY */}
-      <Text style={styles.label}>RUN DURATION</Text>
-      <Text style={styles.status}>{formatTime(timer)}</Text>
+      {/* 1. TOP STATS BAR */}
+      <View style={styles.header}>
+        <View style={styles.streakBadge}>
+          <Text style={styles.streakEmoji}>🔥</Text>
+          <Text style={styles.streakText}>STREAK: 5 DAYS</Text>
+        </View>
+        <View style={[styles.stageBadge, { backgroundColor: status === 'running' ? '#2563eb' : '#1e293b' }]}>
+          <Text style={styles.stageText}>STAGE: {status.toUpperCase()}</Text>
+        </View>
+      </View>
 
-      {/* CENTER BOX: BUDDY EMOJI */}
-      <View style={styles.box}>
-        <Text style={styles.emoji}>
+      {/* 2. MAIN TIMER */}
+      <Text style={styles.label}>RUN DURATION</Text>
+      <Text style={styles.timerBold}>{formatTime(timer)}</Text>
+
+      {/* 3. BUDDY AREA */}
+      <View style={styles.buddyCard}>
+        <Text style={styles.emojiDisplay}>
           {status === 'idle' ? '😴' : status === 'running' ? '🏃‍♂️' : '🎉'}
         </Text>
-        <Text style={styles.subtext}>
-          {status === 'idle' ? 'Buddy is ready!' : status === 'running' ? 'Tracking movement...' : 'Run finished!'}
+        <Text style={styles.buddyMood}>
+          {status === 'idle' ? 'Buddy is resting...' : status === 'running' ? 'Tracking effort!' : 'Run Summary Ready!'}
         </Text>
       </View>
 
-      {/* MAIN START/STOP BUTTON */}
-      <TouchableOpacity style={styles.button} onPress={handlePress}>
-        <Text style={styles.buttonText}>
-          {status === 'idle' ? 'START RUN' : status === 'running' ? 'FINISH RUN' : 'RESET'}
+      {/* 4. PRIMARY BUTTON */}
+      <TouchableOpacity style={[styles.actionBtn, status === 'running' && { backgroundColor: '#ef4444' }]} onPress={handlePress}>
+        <Text style={styles.actionBtnText}>
+          {status === 'idle' ? 'START RUN' : status === 'running' ? 'FINISH RUN' : 'RESET SESSION'}
         </Text>
       </TouchableOpacity>
 
-      {/* REWARD MODAL (Summary with distance) */}
+      {/* REWARD MODAL */}
       <Modal visible={showReward} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Great Run! 📸</Text>
-            
-            <View style={styles.statsPreview}>
-              <Text style={styles.statsText}>Time: {formatTime(currentRun?.stats?.duration || 0)}</Text>
-              <Text style={styles.statsText}>Distance: {currentRun?.stats?.distance || "0.00"} KM</Text>
+            <View style={styles.summaryStats}>
+              <Text style={styles.sumText}>Time: {formatTime(timer)}</Text>
+              <Text style={styles.sumText}>Distance: {(timer / 300).toFixed(2)} KM</Text>
             </View>
-
-            <TouchableOpacity style={styles.primaryBtn} onPress={openCamera}>
-              <Text style={styles.primaryText}>Capture Victory</Text>
+            <TouchableOpacity style={styles.rewardBtn} onPress={openCamera}>
+              <Text style={styles.rewardBtnText}>Open Camera</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity onPress={() => setShowReward(false)} style={{marginTop: 15}}>
-              <Text style={styles.secondaryText}>Skip reward</Text>
+            <TouchableOpacity onPress={() => setShowReward(false)} style={{ marginTop: 20 }}>
+              <Text style={styles.skipText}>Skip reward</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* FULL SCREEN CAMERA */}
+      {/* CAMERA MODAL - FIXED UI */}
       <Modal visible={showCamera} animationType="fade">
         <CameraView style={styles.camera} ref={cameraRef} facing={facing}>
-          <View style={styles.cameraUI}>
-            
-            {/* Stats Overlay on Camera */}
-            <View style={styles.cameraTimer}>
-              <Text style={styles.cameraTimerText}>
-                {formatTime(currentRun?.stats?.duration || 0)} | {currentRun?.stats?.distance || "0.00"} KM
-              </Text>
-            </View>
-
-            {/* Selfie Flip Button */}
-            <TouchableOpacity style={styles.flipButton} onPress={() => setFacing(f => f === 'back' ? 'front' : 'back')}>
-              <Text style={styles.flipText}>🔄 FLIP</Text>
+          {/* Top Controls */}
+          <View style={styles.cameraTopControls}>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => setFacing(f => f === 'back' ? 'front' : 'back')}>
+              <Text style={styles.iconEmoji}>🔄</Text>
             </TouchableOpacity>
-
-            {/* Circle Capture Button */}
-            <TouchableOpacity 
-              style={[styles.capture, isCapturing && { opacity: 0.5 }]} 
-              onPress={takePhoto} 
-              disabled={isCapturing}
-            >
-              <View style={styles.captureInner} />
+            <TouchableOpacity style={styles.iconBtn} onPress={() => setShowCamera(false)}>
+              <Text style={styles.iconEmoji}>ⓧ</Text>
             </TouchableOpacity>
+          </View>
 
-            <TouchableOpacity style={styles.close} onPress={() => setShowCamera(false)}>
-              <Text style={{ color: 'white', fontWeight: 'bold' }}>Close</Text>
+          {/* Bottom Shutter */}
+          <View style={styles.cameraBottomUI}>
+            <TouchableOpacity style={styles.shutter} onPress={takePhoto} disabled={isCapturing}>
+              <View style={styles.shutterInner} />
             </TouchableOpacity>
           </View>
         </CameraView>
@@ -188,32 +172,33 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc', justifyContent: 'center', alignItems: 'center', padding: 30 },
+  container: { flex: 1, backgroundColor: '#f8fafc', padding: 30, paddingTop: 60, alignItems: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 40 },
+  streakBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff7ed', padding: 8, borderRadius: 12, borderWidth: 1, borderColor: '#ffedd5' },
+  streakEmoji: { fontSize: 14, marginRight: 5 },
+  streakText: { fontSize: 10, fontWeight: '900', color: '#f97316' },
+  stageBadge: { padding: 8, borderRadius: 12 },
+  stageText: { color: 'white', fontSize: 10, fontWeight: '900' },
   label: { fontSize: 10, color: '#94a3b8', fontWeight: 'bold', letterSpacing: 2 },
-  status: { fontSize: 48, fontWeight: '900', marginBottom: 20, color: '#0f172a' },
-  box: { width: '100%', height: 250, backgroundColor: 'white', borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 30, borderWidth: 1, borderColor: '#e2e8f0' },
-  emoji: { fontSize: 60 },
-  subtext: { marginTop: 10, color: '#64748b', fontWeight: '600' },
-  button: { width: '100%', backgroundColor: '#0f172a', padding: 18, borderRadius: 15, alignItems: 'center' },
-  buttonText: { color: 'white', fontWeight: '900', fontSize: 16 },
-  
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  timerBold: { fontSize: 56, fontWeight: '900', color: '#0f172a', marginVertical: 10 },
+  buddyCard: { width: '100%', height: 260, backgroundColor: 'white', borderRadius: 30, justifyContent: 'center', alignItems: 'center', marginVertical: 20, borderWidth: 1, borderColor: '#e2e8f0', borderStyle: 'dashed' },
+  emojiDisplay: { fontSize: 70 },
+  buddyMood: { marginTop: 15, color: '#64748b', fontWeight: '600' },
+  actionBtn: { width: '100%', backgroundColor: '#0f172a', padding: 20, borderRadius: 20, alignItems: 'center' },
+  actionBtnText: { color: 'white', fontWeight: '900', fontSize: 18 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
   modalBox: { width: '85%', backgroundColor: 'white', padding: 30, borderRadius: 30, alignItems: 'center' },
-  modalTitle: { fontSize: 22, fontWeight: '900', marginBottom: 10 },
-  statsPreview: { backgroundColor: '#f1f5f9', padding: 15, borderRadius: 15, marginBottom: 25, width: '100%', alignItems: 'center' },
-  statsText: { fontSize: 16, color: '#64748b', fontWeight: 'bold', marginVertical: 2 },
-  
-  primaryBtn: { backgroundColor: '#2563eb', padding: 18, width: '100%', borderRadius: 15, alignItems: 'center' },
-  primaryText: { color: 'white', fontWeight: 'bold' },
-  secondaryText: { color: '#94a3b8', fontWeight: 'bold' },
-  
+  modalTitle: { fontSize: 24, fontWeight: '900', marginBottom: 20 },
+  summaryStats: { backgroundColor: '#f1f5f9', width: '100%', padding: 15, borderRadius: 15, marginBottom: 25 },
+  sumText: { fontWeight: '700', color: '#475569', textAlign: 'center', marginVertical: 2 },
+  rewardBtn: { backgroundColor: '#2563eb', width: '100%', padding: 18, borderRadius: 15, alignItems: 'center' },
+  rewardBtnText: { color: 'white', fontWeight: 'bold' },
+  skipText: { color: '#94a3b8', fontWeight: '800' },
   camera: { flex: 1 },
-  cameraUI: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 60 },
-  cameraTimer: { position: 'absolute', top: 120, alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 },
-  cameraTimerText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
-  flipButton: { position: 'absolute', top: 60, left: 30, backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 10 },
-  flipText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
-  capture: { width: 80, height: 80, borderRadius: 40, borderWidth: 6, borderColor: 'white', justifyContent: 'center', alignItems: 'center' },
-  captureInner: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'white' },
-  close: { position: 'absolute', top: 60, right: 30, backgroundColor: 'rgba(0,0,0,0.5)', padding: 10, borderRadius: 10 }
+  cameraTopControls: { position: 'absolute', top: 60, width: '100%', flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 30 },
+  iconBtn: { width: 50, height: 50, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 25, justifyContent: 'center', alignItems: 'center' },
+  iconEmoji: { color: 'white', fontSize: 24 },
+  cameraBottomUI: { position: 'absolute', bottom: 60, width: '100%', alignItems: 'center' },
+  shutter: { width: 80, height: 80, borderRadius: 40, borderWidth: 6, borderColor: 'white', justifyContent: 'center', alignItems: 'center' },
+  shutterInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'white' }
 });
