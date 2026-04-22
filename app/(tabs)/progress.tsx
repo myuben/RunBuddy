@@ -9,44 +9,45 @@ export default function ProgressScreen() {
   const [selectedRun, setSelectedRun] = useState<any>(null);
   const navigation = useNavigation();
 
-// ⚡️ AUDITED STREAK LOGIC
+// ⚡️ AUDITED: Pure String-Based Streak Logic (Fixed Timezone & Locale)
   const calculateStreak = (runs: any[]) => {
     if (!runs || runs.length === 0) return 0;
 
-    // 1. Convert all dates to Local YYYY-MM-DD (Fixes Timezone/Duplicate bugs)
-    const localDates = runs.map(r => {
-      const d = new Date(r.date);
-      // Returns 'YYYY-MM-DD' in local time
-      return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
-    });
+    // Helper: Step-back 1 day using pure string math logic (via numeric constructor)
+    const getPrevDay = (dateStr: string) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      // Using numeric constructor is safe and locale-independent
+      const dObj = new Date(y, m - 1, d - 1); 
+      return `${dObj.getFullYear()}-${(dObj.getMonth() + 1).toString().padStart(2, '0')}-${dObj.getDate().toString().padStart(2, '0')}`;
+    };
 
-    // 2. Remove duplicates (Multiple runs in one day = 1 streak day)
-    const uniqueDates = Array.from(new Set(localDates)).sort((a, b) => b.localeCompare(a));
+    // 1. Extract UTC date strings (String-only: '2024-04-22')
+    // No "new Date(dateStr)" used here.
+    const allDates = runs.map(r => r.date.split('T')[0]);
 
-    // 3. Check if we have a run today or yesterday
-    const now = new Date();
-    const today = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
-    
-    const yesterdayDate = new Date(Date.now() - 86400000);
-    const yesterday = `${yesterdayDate.getFullYear()}-${(yesterdayDate.getMonth() + 1).toString().padStart(2, '0')}-${yesterdayDate.getDate().toString().padStart(2, '0')}`;
+    // 2. Filter Unique & Sort Newest to Oldest (String comparison)
+    const sortedUnique = Array.from(new Set(allDates)).sort((a, b) => b.localeCompare(a));
 
-    if (uniqueDates[0] !== today && uniqueDates[0] !== yesterday) return 0;
+    // 3. Get Reference Strings (Today/Yesterday in UTC)
+    const todayStr = new Date().toISOString().split('T')[0];
+    const yesterdayStr = getPrevDay(todayStr);
 
-    // 4. Count backward consecutively
-    let count = 0;
-    let checkDate = new Date(uniqueDates[0]); // Start from the most recent run
+    // 4. Verify Streak is alive
+    if (sortedUnique[0] !== todayStr && sortedUnique[0] !== yesterdayStr) return 0;
 
-    for (const dateStr of uniqueDates) {
-      const current = new Date(dateStr);
-      // If this date is the one we expect (consecutive), increment
-      if (current.toDateString() === checkDate.toDateString()) {
-        count++;
-        checkDate.setDate(checkDate.getDate() - 1); // Look for the previous day
+    // 5. String-comparison loop
+    let streakCount = 0;
+    let expectedDay = sortedUnique[0];
+
+    for (const actualDay of sortedUnique) {
+      if (actualDay === expectedDay) {
+        streakCount++;
+        expectedDay = getPrevDay(expectedDay); // Step expected day back
       } else {
-        break; // Gap found!
+        break; // Gap detected
       }
     }
-    return count;
+    return streakCount;
   };
 
   const loadData = async () => {
