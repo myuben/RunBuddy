@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useNavigation } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function HomeScreen() {
   const [status, setStatus] = useState<'idle' | 'running' | 'finished'>('idle');
@@ -10,8 +10,6 @@ export default function HomeScreen() {
   const [showReward, setShowReward] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [facing, setFacing] = useState<'front' | 'back'>('back');
-  
-  // 📸 NEW: Preview States
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
 
@@ -22,58 +20,104 @@ export default function HomeScreen() {
   const [history, setHistory] = useState<any[]>([]);
   const [streak, setStreak] = useState(0);
 
+  // 🔥 NEW: GRACE SYSTEM STATE
+  const [streakStatus, setStreakStatus] = useState<"active" | "grace" | "broken">("broken");
+
+  const [streakMessage, setStreakMessage] = useState("");
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const prevStreak = useRef(0);
   const navigation = useNavigation();
 
-// ⚡️ AUDITED: Pure String-Based Streak Logic (Fixed Timezone & Locale)
-  const calculateStreak = (runs: any[]) => {
-    if (!runs || runs.length === 0) return 0;
+  // 🛡 GRACE SYSTEM HELPER (Pure Calendar Calculation)
+  const determineStreakStatus = (lastRunDateStr: string | null, todayStr: string) => {
+    if (!lastRunDateStr) return "broken";
+    const [y1, m1, d1] = lastRunDateStr.split('-').map(Number);
+    const [y2, m2, d2] = todayStr.split('-').map(Number);
+    const date1 = new Date(y1, m1 - 1, d1);
+    const date2 = new Date(y2, m2 - 1, d2);
+    const diffTime = date2.getTime() - date1.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-    // Helper: Step-back 1 day using pure string math logic (via numeric constructor)
+    if (diffDays <= 1) return "active"; // Same day or Yesterday
+    if (diffDays === 2) return "grace"; // Missed 1 full day
+    return "broken"; // Missed 2+ full days
+  };
+
+  // HEADING LOGIC
+  useEffect(() => {
+    if (streak > prevStreak.current && streak > 0) {
+      let msg = "NICE START";
+      if (streak >= 14) msg = "ELITE CONSISTENCY";
+      else if (streak >= 7) msg = "YOU’RE ON FIRE";
+      else if (streak >= 3) msg = "BUILDING MOMENTUM";
+      setStreakMessage(msg);
+      Animated.sequence([
+        Animated.spring(scaleAnim, { toValue: 1.3, useNativeDriver: true }),
+        Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true })
+      ]).start();
+    }
+    prevStreak.current = streak;
+  }, [streak]);
+
+  // 🔥 STREAK CALCULATION
+  const calculateStreak = (runs: any[], offset: number) => {
+    if (!runs || runs.length === 0) return 0;
+    
     const getPrevDay = (dateStr: string) => {
       const [y, m, d] = dateStr.split('-').map(Number);
-      // Using numeric constructor is safe and locale-independent
       const dObj = new Date(y, m - 1, d - 1); 
       return `${dObj.getFullYear()}-${(dObj.getMonth() + 1).toString().padStart(2, '0')}-${dObj.getDate().toString().padStart(2, '0')}`;
     };
 
-    // 1. Extract UTC date strings (String-only: '2024-04-22')
-    // No "new Date(dateStr)" used here.
     const allDates = runs.map(r => r.date.split('T')[0]);
-
-    // 2. Filter Unique & Sort Newest to Oldest (String comparison)
     const sortedUnique = Array.from(new Set(allDates)).sort((a, b) => b.localeCompare(a));
 
-    // 3. Get Reference Strings (Today/Yesterday in UTC)
-    const todayStr = new Date().toISOString().split('T')[0];
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const todayStr = d.toISOString().split('T')[0];
     const yesterdayStr = getPrevDay(todayStr);
+    const twoDaysAgoStr = getPrevDay(yesterdayStr); // 🔥 NEW: Grace day reference
 
-    // 4. Verify Streak is alive
-    if (sortedUnique[0] !== todayStr && sortedUnique[0] !== yesterdayStr) return 0;
+    // 🔥 UPDATED: Only return 0 if the last run is older than 2 calendar days
+    if (sortedUnique[0] !== todayStr && sortedUnique[0] !== yesterdayStr && sortedUnique[0] !== twoDaysAgoStr) {
+      return 0;
+    }
 
-    // 5. String-comparison loop
     let streakCount = 0;
     let expectedDay = sortedUnique[0];
-
     for (const actualDay of sortedUnique) {
       if (actualDay === expectedDay) {
         streakCount++;
-        expectedDay = getPrevDay(expectedDay); // Step expected day back
-      } else {
-        break; // Gap detected
-      }
+        expectedDay = getPrevDay(expectedDay);
+      } else break;
     }
     return streakCount;
   };
 
   const loadData = async () => {
     const saved = await AsyncStorage.getItem('RUN_HISTORY');
+    const offRaw = await AsyncStorage.getItem('DEV_OFFSET');
+    const off = offRaw ? parseInt(offRaw) : 0;
+    
     if (saved) {
       const parsed = JSON.parse(saved);
-      setHistory(parsed);
-      setStreak(calculateStreak(parsed));
+      const runHistory = parsed;
+      setHistory(runHistory);
+      
+      const currentStreak = calculateStreak(runHistory, off);
+      setStreak(currentStreak);
+
+      // 🔥 UPDATE GRACE STATUS
+      const d = new Date();
+      d.setDate(d.getDate() + off);
+      const todayStr = d.toISOString().split('T')[0];
+      const lastRun = runHistory.length > 0 ? runHistory[runHistory.length - 1].date.split('T')[0] : null;
+      setStreakStatus(determineStreakStatus(lastRun, todayStr));
+
     } else {
       setHistory([]);
       setStreak(0);
+      setStreakStatus("broken");
       setStatus('idle');
       setTimer(0);
     }
@@ -97,22 +141,22 @@ export default function HomeScreen() {
       setTimer(0);
       setStatus('running');
     } else if (status === 'running') {
-      const distance = (timer / 300).toFixed(2);
+      const offRaw = await AsyncStorage.getItem('DEV_OFFSET');
+      const off = offRaw ? parseInt(offRaw) : 0;
+      const d = new Date();
+      d.setDate(d.getDate() + off);
       const newRunId = Math.random().toString(36).substring(2);
       const run = {
         id: newRunId,
-        date: new Date().toISOString(),
-        stats: { duration: timer, distance },
+        date: d.toISOString(),
+        stats: { duration: timer, distance: (timer / 300).toFixed(2) },
         reward: { photoUri: '' }
       };
       
       const updatedHistory = [...history, run];
       await AsyncStorage.setItem('RUN_HISTORY', JSON.stringify(updatedHistory));
-      
-      // 🔥 SYNC FIX: Update local state immediately
       setHistory(updatedHistory);
-      setStreak(calculateStreak(updatedHistory)); 
-      
+      setStreak(calculateStreak(updatedHistory, off)); 
       setCurrentRunId(newRunId);
       setStatus('finished');
       setShowReward(true);
@@ -120,6 +164,12 @@ export default function HomeScreen() {
       setStatus('idle');
       setTimer(0);
     }
+  };
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
   };
 
   const openCamera = async () => {
@@ -140,7 +190,7 @@ export default function HomeScreen() {
         setIsCapturing(true);
         const photo = await cameraRef.current.takePictureAsync({ quality: 0.5 });
         setCapturedPhoto(photo.uri);
-        setShowPreview(true); // Switch to preview
+        setShowPreview(true);
         setIsCapturing(false);
       }
     } catch (e) { setIsCapturing(false); }
@@ -158,29 +208,36 @@ export default function HomeScreen() {
     Alert.alert('Success!', 'Victory photo saved! 📸');
   };
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.streakBadge}>
+        <Animated.View style={[styles.streakBadge, { transform: [{ scale: scaleAnim }] }]}>
           <Text style={styles.streakEmoji}>🔥</Text>
           <Text style={styles.streakText}>STREAK: {streak} {streak === 1 ? 'DAY' : 'DAYS'}</Text>
-        </View>
+        </Animated.View>
         <View style={[styles.stageBadge, { backgroundColor: status === 'running' ? '#2563eb' : '#1e293b' }]}>
           <Text style={styles.stageText}>STAGE: {status.toUpperCase()}</Text>
         </View>
+      </View>
+
+      {/* 🔥 UI: GRACE & FEEDBACK MESSAGES */}
+      <View style={{ alignItems: 'center', marginBottom: 20 }}>
+        {streak > 0 && streakStatus === 'active' && <Text style={styles.feedbackMessage}>{streakMessage}</Text>}
+        {streakStatus === "grace" && (
+          <View style={styles.graceWarning}>
+            <Text style={styles.graceText}>🛡 Still in recovery window</Text>
+          </View>
+        )}
+        {streakStatus === "broken" && history.length > 0 && (
+          <Text style={styles.brokenMessage}>STREAK RESET ⚠️</Text>
+        )}
       </View>
       
       <Text style={styles.label}>RUN DURATION</Text>
       <Text style={styles.timerBold}>{formatTime(timer)}</Text>
       
       <View style={styles.buddyCard}>
-        <Text style={styles.emojiDisplay}>{status === 'idle' ? '😴' : status === 'running' ? '🏃‍♂️' : '🎉'}</Text>
+        <Text style={styles.emojiDisplay}>{status === 'idle' ? '😴' : status === 'running' ? '🏃♂️' : '🎉'}</Text>
         <Text style={styles.buddyMood}>{status === 'idle' ? 'Buddy is resting...' : status === 'running' ? 'Tracking effort!' : 'Run Summary Ready!'}</Text>
       </View>
 
@@ -194,7 +251,6 @@ export default function HomeScreen() {
         <TouchableOpacity onPress={() => setShowReward(false)} style={{ marginTop: 20 }}><Text style={styles.skipText}>Skip reward</Text></TouchableOpacity></View></View>
       </Modal>
 
-      {/* CAMERA & PREVIEW MODAL */}
       <Modal visible={showCamera} animationType="fade">
         {!showPreview ? (
           <CameraView style={styles.camera} ref={cameraRef} facing={facing}>
@@ -226,10 +282,14 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc', padding: 30, paddingTop: 60, alignItems: 'center' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 40 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 10 },
   streakBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff7ed', padding: 8, borderRadius: 12, borderWidth: 1, borderColor: '#ffedd5' },
   streakEmoji: { fontSize: 14, marginRight: 5 },
   streakText: { fontSize: 10, fontWeight: '900', color: '#f97316' },
+  feedbackMessage: { fontSize: 12, fontWeight: '800', color: '#f97316', letterSpacing: 1 },
+  graceWarning: { backgroundColor: '#fef2f2', padding: 8, borderRadius: 10, borderWidth: 1, borderColor: '#fee2e2' },
+  graceText: { color: '#ef4444', fontSize: 10, fontWeight: 'bold' },
+  brokenMessage: { fontSize: 10, fontWeight: '800', color: '#94a3b8' },
   stageBadge: { padding: 8, borderRadius: 12 },
   stageText: { color: 'white', fontSize: 10, fontWeight: '900' },
   label: { fontSize: 10, color: '#94a3b8', fontWeight: 'bold', letterSpacing: 2 },

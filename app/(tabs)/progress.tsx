@@ -7,59 +7,71 @@ export default function ProgressScreen() {
   const [history, setHistory] = useState<any[]>([]);
   const [streak, setStreak] = useState(0);
   const [selectedRun, setSelectedRun] = useState<any>(null);
+  const [streakStatus, setStreakStatus] = useState<"active" | "grace" | "broken">("broken");
   const navigation = useNavigation();
 
-// ⚡️ AUDITED: Pure String-Based Streak Logic (Fixed Timezone & Locale)
-  const calculateStreak = (runs: any[]) => {
-    if (!runs || runs.length === 0) return 0;
+  // 🛡 GRACE SYSTEM HELPER
+  const determineStreakStatus = (lastRunDateStr: string | null, todayStr: string) => {
+    if (!lastRunDateStr) return "broken";
+    const [y1, m1, d1] = lastRunDateStr.split('-').map(Number);
+    const [y2, m2, d2] = todayStr.split('-').map(Number);
+    const date1 = new Date(y1, m1 - 1, d1);
+    const date2 = new Date(y2, m2 - 1, d2);
+    const diffTime = date2.getTime() - date1.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays <= 1) return "active";
+    if (diffDays === 2) return "grace";
+    return "broken";
+  };
 
-    // Helper: Step-back 1 day using pure string math logic (via numeric constructor)
+  const calculateStreak = (runs: any[], offset: number) => {
+    if (!runs || runs.length === 0) return 0;
     const getPrevDay = (dateStr: string) => {
       const [y, m, d] = dateStr.split('-').map(Number);
-      // Using numeric constructor is safe and locale-independent
       const dObj = new Date(y, m - 1, d - 1); 
       return `${dObj.getFullYear()}-${(dObj.getMonth() + 1).toString().padStart(2, '0')}-${dObj.getDate().toString().padStart(2, '0')}`;
     };
-
-    // 1. Extract UTC date strings (String-only: '2024-04-22')
-    // No "new Date(dateStr)" used here.
     const allDates = runs.map(r => r.date.split('T')[0]);
-
-    // 2. Filter Unique & Sort Newest to Oldest (String comparison)
     const sortedUnique = Array.from(new Set(allDates)).sort((a, b) => b.localeCompare(a));
-
-    // 3. Get Reference Strings (Today/Yesterday in UTC)
-    const todayStr = new Date().toISOString().split('T')[0];
+    
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const todayStr = d.toISOString().split('T')[0];
     const yesterdayStr = getPrevDay(todayStr);
+    const twoDaysAgoStr = getPrevDay(yesterdayStr); // 🔥 Grace day
 
-    // 4. Verify Streak is alive
-    if (sortedUnique[0] !== todayStr && sortedUnique[0] !== yesterdayStr) return 0;
-
-    // 5. String-comparison loop
+    if (sortedUnique[0] !== todayStr && sortedUnique[0] !== yesterdayStr && sortedUnique[0] !== twoDaysAgoStr) return 0;
+    
     let streakCount = 0;
     let expectedDay = sortedUnique[0];
-
     for (const actualDay of sortedUnique) {
       if (actualDay === expectedDay) {
         streakCount++;
-        expectedDay = getPrevDay(expectedDay); // Step expected day back
-      } else {
-        break; // Gap detected
-      }
+        expectedDay = getPrevDay(expectedDay);
+      } else break;
     }
     return streakCount;
   };
 
   const loadData = async () => {
     const saved = await AsyncStorage.getItem('RUN_HISTORY');
+    const offRaw = await AsyncStorage.getItem('DEV_OFFSET');
+    const off = offRaw ? parseInt(offRaw) : 0;
+
     if (saved) {
       const parsed = JSON.parse(saved);
       setHistory(parsed);
-      setStreak(calculateStreak(parsed));
+      setStreak(calculateStreak(parsed, off));
+
+      const d = new Date();
+      d.setDate(d.getDate() + off);
+      const todayStr = d.toISOString().split('T')[0];
+      const lastRun = parsed.length > 0 ? parsed[parsed.length - 1].date.split('T')[0] : null;
+      setStreakStatus(determineStreakStatus(lastRun, todayStr));
     } else {
       setHistory([]);
       setStreak(0);
-      setSelectedRun(null);
+      setStreakStatus("broken");
     }
   };
 
@@ -74,30 +86,28 @@ export default function ProgressScreen() {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // 🔥 CORE FIX: FILTER OUT ANY RUNS WITHOUT A PHOTO URI
   const photoRuns = history.filter(run => run.reward?.photoUri && run.reward.photoUri !== '');
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.viewLabel}>View 02: Verification</Text>
-      
       <View style={styles.statsGrid}>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>TOTAL RUNS</Text>
           <Text style={styles.statValue}>{history.length}</Text>
         </View>
-        <View style={[styles.statCard, { borderColor: '#f97316' }]}>
-          {/* 🔥 GRAMMAR FIX: 1 Day vs X Days */}
-          <Text style={[styles.statLabel, { color: '#f97316' }]}>{streak === 1 ? 'DAY STREAK' : 'DAYS STREAK'}</Text>
-          <Text style={[styles.statValue, { color: '#f97316' }]}>{streak}</Text>
+        <View style={[styles.statCard, streakStatus === 'grace' ? { borderColor: '#ef4444' } : { borderColor: '#f97316' }]}>
+          <Text style={[styles.statLabel, { color: streakStatus === 'grace' ? '#ef4444' : '#f97316' }]}>
+            {streakStatus === 'grace' ? 'GRACE ACTIVE' : (streak === 1 ? 'DAY STREAK' : 'DAYS STREAK')}
+          </Text>
+          <Text style={[styles.statValue, { color: streakStatus === 'grace' ? '#ef4444' : '#f97316' }]}>{streak}</Text>
         </View>
       </View>
-      
       <View style={styles.reelCard}>
         <Text style={styles.reelTitle}>MOMENT REEL</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.reelScroll}>
           {photoRuns.length === 0 ? (
-            <Text style={styles.emptyText}>No victory photos captured yet!</Text>
+            <Text style={styles.emptyText}>No victory photos yet!</Text>
           ) : (
             photoRuns.map((run, i) => (
               <TouchableOpacity key={i} onPress={() => setSelectedRun(run)} style={styles.snapshot}>
@@ -108,7 +118,8 @@ export default function ProgressScreen() {
           )}
         </ScrollView>
       </View>
-      
+
+      {/* 🔥 RESTORED: PHOTO VIEWER & SHARE BUTTON */}
       <Modal visible={!!selectedRun} transparent animationType="fade">
         <View style={styles.fullOverlay}>
           <View style={styles.viewerBox}>
@@ -121,7 +132,7 @@ export default function ProgressScreen() {
               <Text style={styles.detailText}>Time: {formatDuration(selectedRun?.stats.duration || 0)}</Text>
               <Text style={styles.detailText}>Distance: {selectedRun?.stats.distance} KM</Text>
             </View>
-            <TouchableOpacity style={styles.shareBtn} onPress={() => alert('Sharing logic coming soon!')}>
+            <TouchableOpacity style={styles.shareBtn} onPress={() => alert('Sharing is coming soon!')}>
               <Text style={styles.shareBtnText}>📤 SHARE MOMENT</Text>
             </TouchableOpacity>
           </View>
@@ -146,6 +157,7 @@ const styles = StyleSheet.create({
   snapshot: { width: 120, alignItems: 'center' },
   image: { width: 120, height: 160, borderRadius: 15, backgroundColor: '#1e293b' },
   dateLabel: { color: 'white', fontSize: 10, marginTop: 8, opacity: 0.5 },
+  // 🔥 SHARED STYLES FOR VIEWER
   fullOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   viewerBox: { width: '100%', backgroundColor: 'white', borderRadius: 35, padding: 20, alignItems: 'center' },
   closeBtn: { alignSelf: 'flex-end', padding: 10 },

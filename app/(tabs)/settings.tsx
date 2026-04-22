@@ -1,31 +1,70 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React from 'react';
+import { useNavigation } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function SettingsScreen() {
-  const resetData = () => {
-    Alert.alert(
-      "Reset All Data?",
-      "Buddy will lose all history and streaks! This cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Reset Everything", 
-          style: "destructive",
-          onPress: async () => {
-            // 🔥 DEEP WIPE: Clear everything from storage
-            await AsyncStorage.clear(); 
-            Alert.alert("Success", "Buddy is fresh! Go to the home tab to start over.");
-          }
+  const [offset, setOffset] = useState(0);
+  const navigation = useNavigation();
+
+  const loadOffset = async () => {
+    const val = await AsyncStorage.getItem('DEV_OFFSET');
+    setOffset(val ? parseInt(val) : 0);
+  };
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', loadOffset);
+    return unsubscribe;
+  }, [navigation]);
+
+  // 1. RESET ALL DATA
+  const resetData = async () => {
+    Alert.alert("RESET EVERYTHING?", "This wipes your runs, streak, and simulation.", [
+      { text: "Cancel", style: "cancel" },
+      { 
+        text: "Reset", 
+        style: "destructive",
+        onPress: async () => {
+          await AsyncStorage.clear();
+          setOffset(0);
+          Alert.alert("Success", "Buddy is fresh.");
         }
-      ]
-    );
+      }
+    ]);
+  };
+
+  // 2. ADD FAKE RUN
+  const addFakeRun = async () => {
+    const saved = await AsyncStorage.getItem('RUN_HISTORY');
+    const history = saved ? JSON.parse(saved) : [];
+    
+    // 🔥 We use the SIMULATED DATE for the fake run
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    
+    const run = {
+      id: Math.random().toString(36).substring(2),
+      date: d.toISOString(),
+      stats: { duration: 300, distance: "1.20" },
+      reward: { photoUri: '' }
+    };
+
+    const updated = [...history, run];
+    await AsyncStorage.setItem('RUN_HISTORY', JSON.stringify(updated));
+    Alert.alert("Success", `Fake run added for: ${d.toISOString().split('T')[0]}`);
+  };
+
+  // 3. SIMULATE NEXT DAY
+  const simulateNextDay = async () => {
+    const newOffset = offset + 1;
+    await AsyncStorage.setItem('DEV_OFFSET', newOffset.toString());
+    setOffset(newOffset);
+    Alert.alert("Simulation Moved", `Date jumped +1 day. Total offset: ${newOffset}d`);
   };
 
   const sections = [
     { title: 'PROFILE', items: ['Edit Name', 'Link Strava'] },
-    { title: 'NOTIFICATIONS', items: ['Run celebration', 'Streak reminders'] },
-    { title: 'APP', items: ['About Run Buddy', 'Reset Data'] }
+    { title: 'TESTING (DEV ONLY)', items: ['➕ Add Fake Run', '⏳ Simulate Next Day', '⚠️ Reset Data'] }
   ];
 
   return (
@@ -34,30 +73,36 @@ export default function SettingsScreen() {
 
       {sections.map((section, i) => (
         <View key={i} style={styles.section}>
-          <Text style={styles.sectionTitle}>{section.title}</Text>
+          <Text style={[styles.sectionTitle, section.title === 'TESTING (DEV ONLY)' && {color: '#ef4444'}]}>
+            {section.title} {section.title === 'TESTING (DEV ONLY)' && `(+${offset}d)`}
+          </Text>
           <View style={styles.card}>
-            {section.items.map((item, j) => (
-              <TouchableOpacity 
-                key={j} 
-                disabled={item !== 'Reset Data'}
-                onPress={item === 'Reset Data' ? resetData : undefined}
-                style={[styles.item, j < section.items.length - 1 && styles.border]}
-              >
-                <Text style={[styles.itemText, item === 'Reset Data' && { color: '#ef4444' }]}>{item}</Text>
-                {item === 'Reset Data' ? (
-                   <Text style={{fontSize: 12, color: '#ef4444', fontWeight: 'bold'}}>WIPE ⚠️</Text>
-                ) : (
-                  <View style={styles.togglePlaceholder} />
-                )}
-              </TouchableOpacity>
-            ))}
+            {section.items.map((item, j) => {
+              const isReset = item === '⚠️ Reset Data';
+              const isSim = item === '⏳ Simulate Next Day';
+              const isFake = item === '➕ Add Fake Run';
+
+              return (
+                <TouchableOpacity 
+                  key={j} 
+                  onPress={() => {
+                    if (isReset) resetData();
+                    if (isSim) simulateNextDay();
+                    if (isFake) addFakeRun();
+                  }}
+                  style={[styles.item, j < section.items.length - 1 && styles.border]}
+                >
+                  <Text style={[styles.itemText, isReset && { color: '#ef4444' }]}>{item}</Text>
+                  {!isReset && !isSim && !isFake && <View style={styles.togglePlaceholder} />}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
       ))}
 
       <View style={styles.footer}>
         <Text style={styles.buildLabel}>RUN BUDDY MVP v0.1.0-ALPHA</Text>
-        <Text style={styles.subBuildLabel}>Logical Skeleton Only — [UI_LAYER_IDLE]</Text>
       </View>
     </ScrollView>
   );
